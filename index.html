@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="隐秘单悬浮小说阅读器 - 单行显示、滚轮翻页、悬浮可见移开隐形">
+<!-- PWA 清单：安装后变成真·独立应用窗口（无浏览器标题栏）-->
+<link rel="manifest" href="./manifest.json">
+<!-- 标题极短，让 Edge 原生标题栏文字最小化 -->
+<title>隐秘阅读器</title>
+<style>
+  /* ===== 全局重置 ===== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    background: transparent;
+    font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+  }
+
+  /* ===== 悬浮才显示；不悬浮完全透明（核心隐秘）===== */
+  body {
+    opacity: 0.01;
+    transition: opacity 0.12s linear;
+  }
+  body:hover { opacity: 1; }
+
+  /* ===== 主容器：全黑，覆盖整个窗口 ===== */
+  #app {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    /* 让 Edge 原生边框/阴影也被盖住 */
+    outline: none;
+    box-shadow: none;
+  }
+
+  /* ===== 自绘拖动条：覆盖 Edge 原生标题栏（约 30px）===== */
+  #dragbar {
+    position: relative;
+    flex: 0 0 auto;
+    height: 30px;
+    background: #000;
+    cursor: move;
+    -webkit-app-region: drag;       /* 允许拖动的区域（Electron/CEF 也认）*/
+    border-bottom: 1px solid #1a1a1a;
+    display: flex;
+    align-items: center;
+    padding: 0 6px 0 10px;
+    z-index: 10;
+  }
+  /* 左边一个小点（伪装成标题栏 logo 占位） */
+  #dragbar::before {
+    content: "";
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #2a2a2a;
+    margin-right: 10px;
+    cursor: move;
+  }
+  /* 中间显示状态文字 */
+  #dragbar-label {
+    flex: 1;
+    font-size: 10px;
+    color: #444;
+    letter-spacing: 1px;
+    cursor: move;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* 右侧窗口操作按钮区域（不可拖动） */
+  #win-ctrl {
+    display: flex;
+    gap: 2px;
+    -webkit-app-region: no-drag;    /* 按钮区域不拖动 */
+  }
+  .wbtn {
+    width: 30px; height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: #555;
+    font-size: 12px;
+    font-family: "Segoe UI Symbol", sans-serif;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: background 0.08s, color 0.08s;
+  }
+  .wbtn:hover { background: #1a1a1a; color: #bbb; }
+  .wbtn.close:hover { background: #c42b1c; color: #fff; }
+
+  /* ===== 文字行 ===== */
+  #line-wrap {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    background: #000;
+    padding: 0 16px;
+    min-height: 28px;
+  }
+  #line {
+    width: 100%;
+    color: #e8e8e8;
+    font-size: 16px;
+    font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.1;
+    letter-spacing: 0.3px;
+  }
+  #line.empty { color: #3a3a3a; font-size: 14px; text-align: center; }
+
+  /* ===== 进度条 ===== */
+  #progress {
+    flex: 0 0 auto;
+    height: 14px;
+    background: #0a0a0a;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 8px;
+    font-size: 10px;
+    color: #555;
+    font-family: "Consolas", "Segoe UI", monospace;
+  }
+  #progress .p-idx { color: #666; min-width: 48px; text-align: left; }
+  #progress .p-bar-wrap {
+    flex: 1;
+    height: 2px;
+    background: #1a1a1a;
+    border-radius: 1px;
+    overflow: hidden;
+    position: relative;
+  }
+  #progress .p-bar-wrap .p-fill {
+    position: absolute;
+    left: 0; top: 0;
+    height: 100%;
+    width: 0%;
+    background: #3a7bd5;
+    border-radius: 1px;
+    transition: width 0.25s ease;
+  }
+  #progress .p-pct { color: #555; min-width: 36px; text-align: right; }
+
+  /* ===== 隐藏原生滚动条 ===== */
+  ::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+  /* ===== 隐藏的文件输入 ===== */
+  #fileInput { display: none; }
+
+  /* ===== 翻页淡闪提示 ===== */
+  @keyframes flash-k {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.6); }
+  }
+  .flash { animation: flash-k 0.18s ease; }
+
+  /* ===== 右键菜单 ===== */
+  #ctx-menu {
+    position: fixed;
+    z-index: 9999;
+    display: none;
+    background: #141414;
+    color: #c8c8c8;
+    border: 1px solid #2a2a2a;
+    border-radius: 4px;
+    padding: 3px 0;
+    min-width: 190px;
+    font-size: 12px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+  }
+  #ctx-menu .mi {
+    padding: 6px 14px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #ctx-menu .mi:hover { background: #1f2a3a; }
+  #ctx-menu .mi .hot { color: #4a4a4a; font-size: 11px; margin-left: 14px; }
+  #ctx-menu .sep { height: 1px; background: #222; margin: 4px 0; }
+  #ctx-menu .mi.danger:hover { background: #2a1a1a; color: #f07167; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- ===== 自绘拖动条（覆盖 Edge 原生标题栏）===== -->
+  <div id="dragbar">
+    <span id="dragbar-label">READY</span>
+    <div id="win-ctrl">
+      <button class="wbtn hide"   title="隐藏到任务栏 (Ctrl+Shift+H)">—</button>
+      <button class="wbtn close"  title="关闭 (Esc 长按)">✕</button>
+    </div>
+  </div>
+
+  <!-- ===== 单行文字 ===== -->
+  <div id="line-wrap">
+    <div id="line" class="empty">双击此处导入 TXT  ·  滚轮翻页  ·  右键菜单</div>
+  </div>
+
+  <!-- ===== 进度条 ===== -->
+  <div id="progress">
+    <span class="p-idx">—</span>
+    <div class="p-bar-wrap"><div class="p-fill"></div></div>
+    <span class="p-pct">0.0%</span>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".txt,text/plain">
+<div id="ctx-menu"></div>
+
+<script>
+/* =========================================================
+   隐秘阅读器 v2 - 单 HTML 文件 + PWA 安装支持
+========================================================= */
+
+/* ---------- PWA: Service Worker 注册 ---------- */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      console.log('✅ SW 注册成功:', reg.scope);
+    }).catch((err) => {
+      console.warn('⚠ SW 注册失败（不影响核心功能）:', err.message);
+    });
+  });
+}
+
+/* ---------- PWA: 安装按钮监听 ---------- */
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // 在拖动条上显示安装提示（首次进入时）
+  try {
+    const lbl = document.getElementById('dragbar-label');
+    if (lbl && lbl.textContent === 'READY') {
+      lbl.textContent = 'PWA 可用 · 点击安装 →';
+    }
+  } catch(e) {}
+});
+window.addEventListener('appinstalled', () => {
+  console.log('✅ PWA 已安装');
+  deferredPrompt = null;
+  const lbl = document.getElementById('dragbar-label');
+  if (lbl) lbl.textContent = 'PWA 已安装';
+});
+// 在标签上点击触发安装
+document.addEventListener('DOMContentLoaded', () => {
+  const lbl = document.getElementById('dragbar-label');
+  if (lbl) {
+    lbl.addEventListener('click', () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then((choice) => {
+          deferredPrompt = null;
+        });
+      }
+    });
+  }
+});
+
+const $ = (id) => document.getElementById(id);
+const elDragbar = $('dragbar');
+const elLabel   = $('dragbar-label');
+const elLine    = $('line');
+const elIdx     = document.querySelector('#progress .p-idx');
+const elPct     = document.querySelector('#progress .p-pct');
+const elFill    = document.querySelector('#progress .p-fill');
+const fileInput = $('fileInput');
+const menu      = $('ctx-menu');
+
+let lines = [];
+let idx   = 0;
+
+/* ==================== 窗口拖动（覆盖 Edge 标题栏）==================== */
+(function setupDrag() {
+  let dragging = false, startX = 0, startY = 0, winX = 0, winY = 0;
+
+  elDragbar.addEventListener('mousedown', (e) => {
+    // 排除按钮区域
+    if (e.target.closest('.wbtn')) return;
+    if (e.button !== 0) return;  // 仅左键
+    dragging = true;
+    startX = e.screenX;
+    startY = e.screenY;
+    winX   = window.screenX || 0;
+    winY   = window.screenY || 0;
+    elDragbar.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = e.screenX - startX;
+    const dy = e.screenY - startY;
+    try {
+      // Edge --app= 模式允许 window.moveTo()
+      window.moveTo(winX + dx, winY + dy);
+    } catch (err) { /* 某些浏览器限制，静默失败 */ }
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (dragging) {
+      dragging = false;
+      elDragbar.style.cursor = 'move';
+    }
+  });
+})();
+
+/* ==================== 窗口：关闭 / 隐藏 ==================== */
+function hideWindow() {
+  try {
+    // 缩到极小并移出屏幕，Edge 任务栏图标仍在
+    window.resizeTo(40, 40);
+    window.moveTo(-9999, -9999);
+  } catch (e) { /* 某些浏览器无权限 */ }
+}
+function closeWindow() {
+  try { window.close(); } catch (e) {}
+  // 浏览器安全限制下 window.close 失败时的兜底：把窗口缩没
+  setTimeout(() => {
+    try { window.resizeTo(1, 1); window.moveTo(-9999, -9999); } catch(e){}
+  }, 100);
+}
+
+document.querySelector('.wbtn.close').addEventListener('click', closeWindow);
+document.querySelector('.wbtn.hide').addEventListener('click', hideWindow);
+
+// 恢复隐藏窗口：双击任务栏图标重新 focus 时自动显示
+window.addEventListener('focus', () => {
+  // 如果被 hide 到了屏幕外，这里给个恢复的机会
+  try {
+    if ((window.screenX || 0) < -9000) {
+      window.moveTo(Math.round((screen.availWidth - 640) / 2), 60);
+      window.resizeTo(640, 72);
+    }
+  } catch (e) {}
+});
+
+/* ==================== 初始化窗口尺寸（紧凑窄条）==================== */
+(function initWindowSize() {
+  try {
+    const W = 680, H = 78;
+    window.resizeTo(W, H);
+    // 屏幕右下角
+    const right = (screen.availWidth || 1920) - W - 40;
+    const bottom = (screen.availHeight || 1080) - H - 40;
+    window.moveTo(Math.max(0, right), Math.max(0, bottom));
+  } catch (e) {}
+})();
+
+/* ==================== 渲染 ==================== */
+function render() {
+  if (!lines.length) {
+    elLine.textContent = '双击此处导入 TXT  ·  滚轮翻页  ·  右键菜单';
+    elLine.classList.add('empty');
+    elIdx.textContent = '—';
+    elPct.textContent = '0.0%';
+    elFill.style.width = '0%';
+    elLabel.textContent = 'READY';
+    return;
+  }
+  elLine.classList.remove('empty');
+  if (idx < 0) idx = 0;
+  if (idx >= lines.length) idx = lines.length - 1;
+
+  elLine.textContent = lines[idx];
+  const total = lines.length;
+  const pct = ((idx + 1) / total * 100).toFixed(1);
+  elIdx.textContent = `${idx + 1} / ${total}`;
+  elPct.textContent = pct + '%';
+  elFill.style.width = pct + '%';
+  elLabel.textContent = `P ${pct}%`;
+
+  // 翻页 flash
+  const app = $('app');
+  app.classList.remove('flash');
+  void app.offsetWidth;
+  app.classList.add('flash');
+}
+
+/* ==================== 滚动 ==================== */
+function scroll(delta) {
+  if (!lines.length) return;
+  idx += delta;
+  render();
+}
+
+/* ==================== 滚轮（向下滑=下一行）==================== */
+window.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (e.ctrlKey) {
+    // Ctrl+滚轮 = 调字号
+    const s = parseFloat(getComputedStyle(elLine).fontSize);
+    elLine.style.fontSize = Math.max(12, Math.min(40, e.deltaY < 0 ? s + 2 : s - 2)) + 'px';
+    return;
+  }
+  const dir = e.deltaY > 0 ? 1 : -1;
+  scroll(dir * (e.shiftKey ? 10 : 1));
+}, { passive: false });
+
+/* ==================== 键盘 ==================== */
+window.addEventListener('keydown', (e) => {
+  if (e.repeat && ['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(e.key)) {
+    // 长按方向键持续翻页
+    const map = { ArrowDown:1, ArrowUp:-1, ArrowRight:5, ArrowLeft:-5 };
+    scroll(map[e.key]);
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') { scroll(1); e.preventDefault(); }
+  else if (e.key === 'ArrowUp' || e.key === 'PageUp')              { scroll(-1); e.preventDefault(); }
+  else if (e.key === 'ArrowRight')                                 { scroll(5);  e.preventDefault(); }
+  else if (e.key === 'ArrowLeft')                                  { scroll(-5); e.preventDefault(); }
+  else if (e.key === 'Home')                                       { idx = 0; render(); }
+  else if (e.key === 'End')                                        { idx = lines.length - 1; render(); }
+  else if (e.key === 'Escape')                                     { closeWindow(); }
+  else if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'h')){ hideWindow(); }
+  else if (e.ctrlKey && e.key.toLowerCase() === 'o')               { fileInput.click(); }
+});
+
+/* ==================== 双击导入 ==================== */
+elLine.addEventListener('dblclick', () => fileInput.click());
+elLabel.addEventListener('dblclick', () => fileInput.click());
+
+fileInput.addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  if (!/\.txt$/i.test(f.name)) {
+    alert('仅支持 TXT 文件');
+    fileInput.value = '';
+    return;
+  }
+  const buf = await f.arrayBuffer();
+  const text = decodeText(new Uint8Array(buf));
+  parseAndLoad(text);
+  fileInput.value = '';
+  try { document.title = '· ' + f.name.slice(0, 12); } catch(e){}
+});
+
+/* ==================== 编码自动识别 ==================== */
+function decodeText(bytes) {
+  if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF)
+    return new TextDecoder('utf-8').decode(bytes.slice(3));
+  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE)
+    return new TextDecoder('utf-16le').decode(bytes.slice(2));
+  if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF)
+    return new TextDecoder('utf-16be').decode(bytes.slice(2));
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch(e){}
+  for (const enc of ['gbk','gb18030','big5']) {
+    try { return new TextDecoder(enc).decode(bytes); } catch(e){}
+  }
+  return new TextDecoder('latin-1').decode(bytes);
+}
+
+/* ==================== 文本解析：按行 + 段落合并 ==================== */
+function parseAndLoad(text) {
+  const raw = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const punc = /[。！？.!?…”」』）]$/;
+  const beg  = /^[“「『（\-—\s]/;
+  const merged = [];
+  let buf = '';
+  for (const ln of raw) {
+    if (!buf) buf = ln;
+    else if (punc.test(buf) || beg.test(ln)) { merged.push(buf); buf = ln; }
+    else buf += ln;
+  }
+  if (buf) merged.push(buf);
+  lines = (merged.length >= Math.max(5, raw.length / 10)) ? merged : raw;
+  idx = 0;
+  render();
+}
+
+/* ==================== 右键菜单 ==================== */
+function menuItem(label, handler, hot, danger) {
+  const d = document.createElement('div');
+  d.className = 'mi' + (danger ? ' danger' : '');
+  d.innerHTML = `<span>${label}</span><span class="hot">${hot || ''}</span>`;
+  d.onclick = () => { handler(); menu.style.display = 'none'; };
+  menu.appendChild(d);
+}
+function menuSep() {
+  const s = document.createElement('div');
+  s.className = 'sep';
+  menu.appendChild(s);
+}
+
+menuItem('打开 TXT 文件…', () => fileInput.click(), '双击 / Ctrl+O');
+menuSep();
+menuItem('字号 增大', () => {
+  const s = parseFloat(getComputedStyle(elLine).fontSize);
+  elLine.style.fontSize = Math.min(40, s + 2) + 'px';
+}, 'Ctrl+滚轮上');
+menuItem('字号 减小', () => {
+  const s = parseFloat(getComputedStyle(elLine).fontSize);
+  elLine.style.fontSize = Math.max(12, s - 2) + 'px';
+}, 'Ctrl+滚轮下');
+menuSep();
+menuItem('跳到 开头', () => { idx = 0; render(); }, 'Home');
+menuItem('跳到 结尾', () => { idx = lines.length - 1; render(); }, 'End');
+menuSep();
+menuItem('隐藏窗口', hideWindow, 'Ctrl+Shift+H');
+menuItem('关闭', closeWindow, 'Esc', true);
+
+window.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  menu.style.display = 'block';
+  menu.style.left = Math.min(e.clientX, innerWidth - 200) + 'px';
+  menu.style.top  = Math.min(e.clientY, innerHeight - 200) + 'px';
+});
+window.addEventListener('click', (e) => {
+  if (!menu.contains(e.target)) menu.style.display = 'none';
+});
+
+/* ==================== 初始 ==================== */
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="便利贴">
+  <meta name="theme-color" content="#C75B39">
+  <title>便利贴</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="https://llee777.github.io/LOGO.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="fingerprint-manager.js"></script>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-top">
+      <h1>便利贴</h1>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <button id="notifyBtn" class="notify-btn" style="display: none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+          </svg>
+          <span>开启通知</span>
+        </button>
+        <button id="testNotifyBtn" class="notify-btn" style="display: none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>测试通知</span>
+        </button>
+        <span class="stats" id="stats">0 条记录</span>
+      </div>
+    </div>
+    <div class="search-bar">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" id="searchInput" placeholder="搜索便利贴内容...">
+    </div>
+    <div class="controls">
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all">全部</button>
+        <button class="filter-tab" data-filter="pending">未完成</button>
+        <button class="filter-tab" data-filter="completed">已完成</button>
+      </div>
+      <button class="sort-btn" id="sortBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>
+        <span id="sortLabel">时间</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Note List -->
+  <div class="note-list" id="noteList"></div>
+
+  <!-- Pagination -->
+  <div class="pagination" id="pagination" style="display:none;">
+    <button id="prevBtn">上一页</button>
+    <span class="page-info" id="pageInfo"></span>
+    <button id="nextBtn">下一页</button>
+  </div>
+
+  <!-- Empty State -->
+  <div class="empty-state" id="emptyState" style="display:none;">
+    <div class="empty-icon">📝</div>
+    <p>还没有便利贴<br>点击右下角按钮创建一条吧</p>
+  </div>
+
+  <!-- FAB -->
+  <button class="fab" id="fabBtn" aria-label="新建便利贴">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+
+  <!-- Modal Overlay -->
+  <div class="modal-overlay" id="modalOverlay"></div>
+
+  <!-- Bottom Sheet Modal -->
+  <div class="modal-sheet" id="modalSheet">
+    <div class="sheet-handle"></div>
+    <h2 id="modalTitle">新建便利贴</h2>
+    <div class="form-group">
+      <label for="noteContent">内容</label>
+      <textarea id="noteContent" placeholder="写下你的想法..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>优先级</label>
+      <div class="priority-selector" id="prioritySelector">
+        <div class="priority-option" data-priority="1">紧急</div>
+        <div class="priority-option" data-priority="2">重要</div>
+        <div class="priority-option selected" data-priority="3">一般</div>
+        <div class="priority-option" data-priority="4">较低</div>
+        <div class="priority-option" data-priority="5">日常</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>提醒时间（可选）</label>
+      <div class="reminder-input-wrap">
+        <input type="datetime-local" id="reminderTimeInput">
+        <button type="button" class="reminder-clear-btn" id="reminderClearBtn" aria-label="清除提醒时间">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" id="cancelBtn">取消</button>
+      <button class="btn btn-primary" id="saveBtn">保存</button>
+    </div>
+  </div>
+
+  <!-- Confirm Dialog -->
+  <div class="modal-overlay" id="confirmOverlay"></div>
+  <div class="confirm-dialog" id="confirmDialog">
+    <p id="confirmMessage">确定要删除这条便利贴吗？</p>
+    <div class="confirm-actions">
+      <button class="btn btn-secondary" id="confirmCancel">取消</button>
+      <button class="btn btn-danger" id="confirmOk">删除</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script src="notification.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

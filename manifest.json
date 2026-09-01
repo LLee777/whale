@@ -1,0 +1,18 @@
+{
+  "name": "MombiePWA",
+  "short_name": "Tools",
+  "description": "工具网站",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#F5F0E8",
+  "theme_color": "#C75B39",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://llee777.github.io/LOGO.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
